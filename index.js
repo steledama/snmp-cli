@@ -23,126 +23,105 @@ const fs = require('fs');
 (async () => {
 	init({ clear });
 	input.includes(`help`) && cli.showHelp(0);
-
 	debug && log(flags);
+
+	// snmp-cli
+	if (!input[0]) {
+		console.log('You need to pass the ip address as first argument');
+	}
+	if (!input[1]) {
+		console.log(
+			'The second argument must be get or subtree method. Default value is get method'
+		);
+		if (!input[2]) {
+			console.log(
+				'The third argument must be a valid oid. Default value for get method is 1.3.6.1.2.1.1.5.0'
+			);
+			let getResult = await get(input[0], ['1.3.6.1.2.1.1.5.0']);
+			console.log(getResult);
+			return;
+		}
+		let getResult = await get(input[0], [input[2]]);
+		console.log(getResult);
+	}
+	if (input[1] !== 'subtree' && input[1] !== 'get' && input[1] !== 'bulk') {
+		console.log('The second argument must be get or subtree method');
+		return;
+	}
+	if (input[1] === 'subtree') {
+		if (!input[2]) {
+			console.log(
+				'The third argument must be a valid oid. Default value for subtree method is 1.3.6.1.2.1'
+			);
+			let subtreeResult = await subtree(input[0], '1.3.6.1.2.1');
+			return;
+		}
+		let subtreeResult = await subtree(input[0], input[2]);
+		console.log(subtreeResult);
+	}
 })();
 
-
-/* eslint-disable no-console */
-
-
-
-const get = (ip, oidsArray) =>
-  new Promise((resolve, reject) => {
-    const session = snmp.createSession(ip);
-    session.get(oidsArray, (error, varbinds) => {
-      const finalResult = [];
-      if (error) {
-        reject(error);
-      } else {
-        for (let i = 0; i < varbinds.length; i += 1)
-          if (snmp.isVarbindError(varbinds[i]))
-            reject(snmp.varbindError(varbinds[i]));
-          else {
-            const snmpResult = {
-              oid: varbinds[i].oid.toString(),
-              value: varbinds[i].value.toString(),
-            };
-            finalResult.push(snmpResult);
-          }
-        console.log(finalResult);
-        resolve(finalResult);
-      }
-    });
-    session.trap(snmp.TrapType.LinkDown, (error) => {
-      if (error) reject(error);
-    });
-  });
-
-const subtree = (ip, oid) =>
-  new Promise((resolve, reject) => {
-    const finalResult = [];
-    const maxRepetitions = 20;
-    const options = {};
-    const session = snmp.createSession(ip, 'public', options);
-    const feedCb = (varbinds) => {
-      for (let i = 0; i < varbinds.length; i += 1) {
-        if (snmp.isVarbindError(varbinds[i]))
-          return snmp.letbindError(varbinds[i]);
-        const snmpResult = {
-          oid: varbinds[i].oid.toString(),
-          value: varbinds[i].value.toString(),
-        };
-        finalResult.push(snmpResult);
-      }
-      return finalResult;
-    };
-    session.subtree(oid, maxRepetitions, feedCb, (error) => {
-      if (error) {
-        reject(error);
-      } else {
-        // console.log(finalResult);
-        resolve(finalResult);
-      }
-    });
-  });
-
-async function subtreeRequest(ip, oid) {
-  const result = await subtree(ip, oid);
-  if (oid !== '1.3.6.1') return result;
-  try {
-    fs.writeFileSync('snmp.json', JSON.stringify(result, null, 4));
-    return 'File saved';
-  } catch (err) {
-    return err;
-  }
-}
-async function getRequest(ip, array) {
-  const result = await get(ip, array);
-  return result;
+function writeResult(result) {
+	try {
+		fs.writeFileSync('snmp.json', JSON.stringify(result, null, 4));
+		return 'File saved';
+	} catch (err) {
+		return err;
+	}
 }
 
-// snmp cli
-if (process.argv[2] !== undefined) {
-  const passedIp = process.argv[2];
-  if (process.argv[3] !== undefined) {
-    if (process.argv[3] !== 'get' && process.argv[3] !== 'subtree') {
-      console.log('The method must be get or subtree');
-    }
-    if (process.argv[3] === 'subtree') {
-      let passedOid = '';
-      switch (process.argv[4]) {
-        case 'usagex':
-          passedOid = '1.3.6.1.4.1.253.8.53.13.2.1.6.1.20';
-          break;
-        case 'usagel':
-          passedOid = '1.3.6.1.4.1.641.6.4.2.1.1';
-          break;
-        case 'supply':
-          passedOid = '1.3.6.1.2.1.43.11.1.1';
-          break;
-        default:
-          passedOid = '1.3.6.1';
-      }
-      subtreeRequest(passedIp, passedOid);
-      // SUBTREE default
-    } else {
-      let passedOid = '';
-      switch (process.argv[4]) {
-        case 'serial':
-          passedOid = '1.3.6.1.2.1.43.5.1.1.17.1';
-          break;
-        case 'name':
-          passedOid = '1.3.6.1.2.1.1.5.0';
-          break;
-        default:
-          passedOid = '1.3.6.1.2.1.1.1.0';
-      }
-      const oidsArray = [passedOid];
-      getRequest(passedIp, oidsArray);
-    }
-  } else console.log('You need to pass a method after the ip');
+async function get(ip, oidsArray) {
+	new Promise((resolve, reject) => {
+		const session = snmp.createSession(ip);
+		session.get(oidsArray, (error, varbinds) => {
+			const finalResult = [];
+			if (error) {
+				reject(error);
+			} else {
+				for (const varbind of varbinds)
+					if (snmp.isVarbindError(varbind))
+						reject(snmp.varbindError(varbind));
+					else {
+						const snmpResult = {
+							oid: varbind.oid.toString(),
+							value: varbind.value.toString()
+						};
+						finalResult.push(snmpResult);
+					}
+				console.log(finalResult);
+				resolve(finalResult);
+			}
+		});
+		session.trap(snmp.TrapType.LinkDown, error => {
+			if (error) reject(error);
+		});
+	});
 }
 
-module.exports = { get, subtree };
-return 'ok';
+async function subtree(ip, oid) {
+	new Promise((resolve, reject) => {
+		const finalResult = [];
+		const maxRepetitions = 20;
+		const options = {};
+		const session = snmp.createSession(ip, 'public', options);
+		const feedCb = varbinds => {
+			for (const varbind of varbinds) {
+				const snmpResult = {
+					oid: varbind.oid.toString(),
+					value: varbind.value.toString()
+				};
+				finalResult.push(snmpResult);
+			}
+			console.log(finalResult);
+			return finalResult;
+		};
+		session.subtree(oid, maxRepetitions, feedCb, error => {
+			if (error) {
+				reject(error);
+			} else {
+				console.log(finalResult);
+				resolve(finalResult);
+			}
+		});
+	});
+}
